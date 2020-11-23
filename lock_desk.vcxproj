@@ -75,6 +75,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
+    <IncludePath>D:\Software\opencv\build\include;D:\Code\c++\Azure Kinect\curl\include;D:\Code\c++\Azure Kinect\include\peac;D:\SoftWare\PCL\3rdParty\Eigen\eigen3;$(IncludePath)</IncludePath>
+    <LibraryPath>D:\Software\opencv\build\x86\vc16\lib;D:\Code\c++\Azure Kinect\curl\build\lib\x86;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
@@ -100,15 +102,21 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_SCL_SECURE_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;BOOST_USE_WINDOWS_H;NOMINMAX;VTK_VISUALIZATION;_SILENCE_FPOS_SEEKPOS_DEPRECATION_WARNING;BUILDING_LIBCURL;HTTP_ONLY;ROBO;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>C:\Program Files (x86)\Nachi\OpenNR-IF</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>C:\Program Files (x86)\Nachi\OpenNR-IF</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world411.lib;opencv_world411d.lib;ws2_32.lib;libcurld.lib;winmm.lib;wldap32.lib;Crypt32.lib;OpenNR-IF.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
