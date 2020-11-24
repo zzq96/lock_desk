@@ -8,6 +8,9 @@
 
 
 #define MAX_LOADSTRING 100
+#define TIMER_SEC 22
+#define BUTTON_START 33
+#define BUTTON_STOP 44
 
 // 全局变量:
 HINSTANCE hInst;                                // 当前实例
@@ -24,6 +27,7 @@ BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 auto ConvertCVMatToBMP(cv::Mat frame)->HBITMAP;
+void Thread(PVOID pvoid);
 
 //void WinShowMatImage(const cv::Mat& img, HDC hdc, const RECT& rect);
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
@@ -54,7 +58,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // 主消息循环:
     while (GetMessage(&msg, nullptr, 0, 0))
     {
-        if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
+        //if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
         {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
@@ -108,6 +112,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+   SetTimer(hWnd, TIMER_SEC, 1000, NULL);
 
    if (!hWnd)
    {
@@ -130,22 +135,31 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //  WM_DESTROY  - 发送退出消息并返回
 //
 //
+int cnt = 1;
+bool start = FALSE;
+CRITICAL_SECTION cs;
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	static int cxChar, cyChar, cxCaps;
     static int cxClient, cyClient;
     static HWND hwndButton_start;
     static HWND hwndButton_stop;
-	static TCHAR szBuffer[40];
     static HDC hdcMem_RGB, hdcMem_depth;  
     static HBITMAP hbmp_RGB, hbmp_depth;   //一张位图的句柄  
     static BITMAP bmp_RGB, bmp_depth; 
+	static cv::Mat img_RGB, img_depth;
+	static int scale = 2;
+    static HDC hdc;
+	static PAINTSTRUCT ps;
+	static TCHAR szBuffer[40];
     switch (message)
     {
 
     case WM_CREATE:
 		{
-			HDC hdc = GetDC(hWnd);
+        InitializeCriticalSection(&cs);
+        _beginthread(Thread, 0, NULL);
+			hdc = GetDC(hWnd);
 			GetTextMetrics(hdc, &tm);
             cxChar = tm.tmAveCharWidth;
             cyChar = tm.tmHeight + tm.tmExternalLeading;
@@ -156,14 +170,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 700, 100,
                 20 * cxChar, 7 * cyChar / 4,
-                hWnd, (HMENU)0,
+                hWnd, (HMENU)BUTTON_START,
                 ((LPCREATESTRUCT)lParam)->hInstance, NULL);
             hwndButton_stop = CreateWindow(TEXT("button"),
                 TEXT("暂停"),
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 900, 100,
                 20 * cxChar, 7 * cyChar / 4,
-                hWnd, (HMENU)1,
+                hWnd, (HMENU)BUTTON_STOP,
                 ((LPCREATESTRUCT)lParam)->hInstance, NULL);
 		}
     case WM_SIZE:
@@ -173,21 +187,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
     case WM_COMMAND:
         {
-			HDC hdc = GetDC(hWnd);
+			hdc = GetDC(hWnd);
             int wmId = LOWORD(wParam);
             // 分析菜单选择:
             switch (wmId)
             {
-            case 0:
+            case BUTTON_START:
+                start = TRUE;
 				TextOut(hdc, 800, 0, szBuffer, wsprintf(szBuffer, TEXT("按下了start          ")));
                 break; 
-            case 1:
+            case BUTTON_STOP:
+                start = FALSE;
 				TextOut(hdc, 800, 0, szBuffer, wsprintf(szBuffer, TEXT("按下了stop       ")));
                 break;
             case IDM_ABOUT:
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
                 break;
             case IDM_EXIT:
+                KillTimer(hWnd, 22);
                 DestroyWindow(hWnd);
                 break;
             default:
@@ -197,23 +214,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     case WM_PAINT:
         {
-
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hWnd, &ps);
+            hdc = BeginPaint(hWnd, &ps);
             // TODO: 在此处添加使用 hdc 的任何绘图代码...
-            int x = 0;
-            int y = 0;
-            TCHAR szBuffer[40];
-            TextOut(hdc, 800, y, szBuffer, wsprintf(szBuffer, TEXT("锁扣类别为:%i"), 1));
+            TextOut(hdc, 800, 0, szBuffer, wsprintf(szBuffer, TEXT("锁扣类别为:%i"), cnt));
 
 
 			hdcMem_RGB  = CreateCompatibleDC(hdc); 
 			hdcMem_depth  = CreateCompatibleDC(hdc); 
 
-            int scale = 2;
-            cv::Mat img_RGB, img_depth;
+            EnterCriticalSection(&cs);
             cv::resize(RGB, img_RGB, cv::Size(RGB.cols / scale, RGB.rows / scale));
             cv::resize(depth, img_depth, cv::Size(depth.cols / scale, depth.rows / scale));
+            LeaveCriticalSection(&cs);
             hbmp_RGB = ConvertCVMatToBMP(img_RGB);
             hbmp_depth = ConvertCVMatToBMP(img_RGB);
 			GetObject(hbmp_RGB, sizeof(BITMAP), &bmp_RGB);  //得到一个位图对象  
@@ -229,6 +241,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			DeleteDC(hdcMem_depth);  
 			DeleteObject(hbmp_depth);  
             EndPaint(hWnd, &ps);
+        }
+        break;
+    case WM_TIMER:
+        switch (wParam)
+        {
+        case TIMER_SEC:
+			InvalidateRect(hWnd,NULL,1);
+            break;
+        default:
+            break;
         }
         break;
     case WM_DESTROY:
@@ -260,7 +282,20 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return (INT_PTR)FALSE;
 }
 
+void Thread(PVOID pvoid)
+{
+    while (TRUE)
+    {
+        if (start)
+        {
+            EnterCriticalSection(&cs);
+			cnt++;
+            LeaveCriticalSection(&cs);
+        }
+		Sleep(1000);
+    }
 
+}
 auto ConvertCVMatToBMP (cv::Mat frame) -> HBITMAP
 {      
     auto convertOpenCVBitDepthToBits = [](const int32_t value)
