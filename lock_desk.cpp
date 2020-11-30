@@ -5,6 +5,17 @@
 #include "lock_desk.h"
 #include<opencv2/imgproc/types_c.h>
 #include <opencv2/opencv.hpp>
+#include <winsock2.h>
+#include <vector>
+#include <stdio.h>
+#include<string>
+#include <stdlib.h>
+#include <iostream>
+#include <k4a/k4a.h>
+#include "k4a_grabber.h"
+#include<ctime>
+#include <fstream>
+#include "flask.h"
 
 
 #define MAX_LOADSTRING 100
@@ -18,8 +29,22 @@ WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
 TEXTMETRIC tm;
 //cv::Mat img_global = cv::imread("D:\\Downloads\\cityscapes\\leftImg8bit\\val\\frankfurt\\frankfurt_000000_000294_leftImg8bit.png");
-cv::Mat RGB = cv::imread("D:\\OneDrive\\temp\\BoxData\\BoxData\\train\\img00_colorRevise.png");
-cv::Mat depth = cv::imread("D:\\OneDrive\\temp\\BoxData\\BoxData\\train\\img00_colorRevise.png");
+cv::Mat RGB;
+cv::Mat depth;
+//相机内参畸变系数所在文件
+string caliberation_camera_file = "caliberation_camera.xml";
+//外参所在文件
+string Homo_cam2base_file = "Homo_cam2base.xml";
+
+//初始化kinect相机,里面有各种相机相关的参数和函数
+k4a::KinectAPI kinect(caliberation_camera_file, true);
+//原始的深度图，深度图的伪彩色图，红外线图，红外线伪彩色图
+cv::Mat depthMatOld, colorMatOld, depthcolorMatOld, irMatOld, ircolorMatOld;
+//通过畸变系数校正过后的图片
+cv::Mat depthMat, colorMat, depthcolorMat, irMat, ircolorMat;
+vector<cv::Mat> masks;
+vector<int> classes;
+int lock_classes = -1;
 
 // 此代码模块中包含的函数的前向声明:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -137,6 +162,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //
 int cnt = 1;
 bool start = FALSE;
+bool stop = FALSE;
 CRITICAL_SECTION cs;
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -152,13 +178,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     static HDC hdc;
 	static PAINTSTRUCT ps;
 	static TCHAR szBuffer[40];
+    static int yd = 300, xd = 200;
     switch (message)
     {
 
     case WM_CREATE:
 		{
-        InitializeCriticalSection(&cs);
-        _beginthread(Thread, 0, NULL);
+        //InitializeCriticalSection(&cs);
+        //_beginthread(Thread, 0, NULL);
+		    kinect.GetOpenCVImage(RGB, depthMatOld, depth, irMat, TRUE);
 			hdc = GetDC(hWnd);
 			GetTextMetrics(hdc, &tm);
             cxChar = tm.tmAveCharWidth;
@@ -168,14 +196,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             hwndButton_start = CreateWindow(TEXT("button"),
                 TEXT("开始"),
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                700, 100,
+                700+xd, 100+yd,
                 20 * cxChar, 7 * cyChar / 4,
                 hWnd, (HMENU)BUTTON_START,
                 ((LPCREATESTRUCT)lParam)->hInstance, NULL);
             hwndButton_stop = CreateWindow(TEXT("button"),
                 TEXT("暂停"),
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                900, 100,
+                900+xd, 100+yd,
                 20 * cxChar, 7 * cyChar / 4,
                 hWnd, (HMENU)BUTTON_STOP,
                 ((LPCREATESTRUCT)lParam)->hInstance, NULL);
@@ -194,11 +222,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             {
             case BUTTON_START:
                 start = TRUE;
-				TextOut(hdc, 800, 0, szBuffer, wsprintf(szBuffer, TEXT("按下了start          ")));
+                stop = false;
+				//TextOut(hdc, 800, 0, szBuffer, wsprintf(szBuffer, TEXT("按下了start          ")));
                 break; 
             case BUTTON_STOP:
-                start = FALSE;
-				TextOut(hdc, 800, 0, szBuffer, wsprintf(szBuffer, TEXT("按下了stop       ")));
+                stop = TRUE;
+
+				//TextOut(hdc, 800, 0, szBuffer, wsprintf(szBuffer, TEXT("按下了stop       ")));
                 break;
             case IDM_ABOUT:
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
@@ -216,25 +246,57 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             hdc = BeginPaint(hWnd, &ps);
             // TODO: 在此处添加使用 hdc 的任何绘图代码...
-            TextOut(hdc, 800, 0, szBuffer, wsprintf(szBuffer, TEXT("锁扣类别为:%i"), cnt));
+		  //定义字体的属性
+		  LOGFONT fontRect;
+		  memset(&fontRect,0,sizeof(LOGFONT));
+
+		  fontRect.lfHeight=-50;  //字体的高度
+		  fontRect.lfWeight=FW_HEAVY;//字体的粗细
+
+		  auto hFont=CreateFontIndirect(&fontRect); //创建字体
+		  auto  hOld=SelectObject(hdc,hFont);//引用上面的字体 
+          if (start == false || stop == true)
+		  {
+              if(start ==false)
+		    kinect.GetOpenCVImage(RGB, depthMatOld, depth, irMat, TRUE);
+				TextOut(hdc, 750+xd, 20+yd, szBuffer, wsprintf(szBuffer, TEXT("请点击开始   "), lock_classes));
+		  }
+          else
+          {
+		    kinect.GetOpenCVImage(RGB, depthMatOld, depth, irMat, TRUE);
+			getMasks(RGB, masks, classes);
+            if (classes.size() == 0)
+                lock_classes = -1;
+            else lock_classes = classes[0];
+            if (lock_classes != -1)
+            {
+                for (int h = 0; h < masks[0].rows; h++)
+                    for (int w = 0; w < masks[0].cols; w++)
+                        if (masks[0].at<UINT8>(h, w) == 255)
+                            RGB.at<cv::Vec4b>(h, w) = cv::Vec4b(0, 0, 255, 0);
+                  TextOut(hdc, 750+xd, 20+yd, szBuffer, wsprintf(szBuffer, TEXT("锁扣类别:%i   "), lock_classes));
+              }
+              else
+                  TextOut(hdc, 750+xd, 20+yd, szBuffer, wsprintf(szBuffer, TEXT("      无           ")));
+          }
 
 
 			hdcMem_RGB  = CreateCompatibleDC(hdc); 
 			hdcMem_depth  = CreateCompatibleDC(hdc); 
 
-            EnterCriticalSection(&cs);
+            //EnterCriticalSection(&cs);
             cv::resize(RGB, img_RGB, cv::Size(RGB.cols / scale, RGB.rows / scale));
             cv::resize(depth, img_depth, cv::Size(depth.cols / scale, depth.rows / scale));
-            LeaveCriticalSection(&cs);
+            //LeaveCriticalSection(&cs);
             hbmp_RGB = ConvertCVMatToBMP(img_RGB);
-            hbmp_depth = ConvertCVMatToBMP(img_RGB);
+            hbmp_depth = ConvertCVMatToBMP(img_depth);
 			GetObject(hbmp_RGB, sizeof(BITMAP), &bmp_RGB);  //得到一个位图对象  
 			GetObject(hbmp_depth, sizeof(BITMAP), &bmp_depth);  //得到一个位图对象  
 
 			SelectObject(hdcMem_RGB, hbmp_RGB);  
 			SelectObject(hdcMem_depth, hbmp_depth);  
-			BitBlt(hdc, 0, 0, bmp_RGB.bmWidth, bmp_RGB.bmHeight, hdcMem_RGB, 0, 0, SRCCOPY);        //显示位图  
-			BitBlt(hdc, 0, bmp_RGB.bmHeight, bmp_depth.bmWidth, bmp_depth.bmHeight, hdcMem_depth, 0, 0, SRCCOPY);        //显示位图  
+			BitBlt(hdc, xd, 50, bmp_RGB.bmWidth, bmp_RGB.bmHeight, hdcMem_RGB, 0, 0, SRCCOPY);        //显示位图  
+			BitBlt(hdc, xd, bmp_RGB.bmHeight+70, bmp_depth.bmWidth, bmp_depth.bmHeight, hdcMem_depth, 0, 0, SRCCOPY);        //显示位图  
 
 			DeleteDC(hdcMem_RGB);  
 			DeleteObject(hbmp_RGB);  
@@ -247,7 +309,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         switch (wParam)
         {
         case TIMER_SEC:
-			InvalidateRect(hWnd,NULL,1);
+            if (start == FALSE || stop == TRUE)
+                break;
+            //EnterCriticalSection(&cs);
+			InvalidateRect(hWnd,NULL,FALSE);
+           //LeaveCriticalSection(&cs);
             break;
         default:
             break;
@@ -289,7 +355,11 @@ void Thread(PVOID pvoid)
         if (start)
         {
             EnterCriticalSection(&cs);
-			cnt++;
+		    kinect.GetOpenCVImage(RGB, depthMatOld, depth, irMat, TRUE);
+			getMasks(RGB, masks, classes);
+            if (classes.size() == 0)
+                lock_classes = -1;
+            else lock_classes = classes[0];
             LeaveCriticalSection(&cs);
         }
 		Sleep(1000);
